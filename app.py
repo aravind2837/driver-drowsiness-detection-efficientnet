@@ -1,9 +1,7 @@
 import streamlit as st
-import cv2
 import numpy as np
 import mediapipe as mp
-from PIL import Image
-import time
+from PIL import Image, ImageDraw
 
 # Page Configuration
 st.set_page_config(
@@ -64,7 +62,6 @@ def calculate_mar(landmarks, mouth_indices, w, h):
     return vert / (horiz + 1e-6), pts
 
 def play_alarm_sound():
-    # Embedded Web Audio API beep so no external .mp3 file is required
     alarm_html = """
     <script>
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -103,7 +100,8 @@ with col2:
         h, w, _ = img_np.shape
         
         results = face_mesh.process(img_np)
-        annotated_img = img_np.copy()
+        annotated_img = img.copy()
+        draw = ImageDraw.Draw(annotated_img)
         
         if results.multi_face_landmarks:
             landmarks = results.multi_face_landmarks[0].landmark
@@ -112,11 +110,11 @@ with col2:
             avg_ear = (left_ear + right_ear) / 2.0
             mar, m_pts = calculate_mar(landmarks, MOUTH, w, h)
             
-            # Draw visual markers on face
-            for pt in l_pts + r_pts:
-                cv2.circle(annotated_img, pt, 2, (0, 255, 0), -1)
-            for pt in m_pts:
-                cv2.circle(annotated_img, pt, 3, (255, 165, 0), -1)
+            # Draw visual markers on face using PIL
+            for x, y in l_pts + r_pts:
+                draw.ellipse((x - 3, y - 3, x + 3, y + 3), fill=(0, 255, 0))
+            for x, y in m_pts:
+                draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=(255, 165, 0))
             
             st.image(annotated_img, caption="Processed Facial ROI & Landmarks", use_container_width=True)
             
