@@ -1,6 +1,8 @@
 import streamlit as st
 import numpy as np
+import urllib.request
 import urllib.parse
+import json
 from PIL import Image, ImageDraw
 from scipy.ndimage import gaussian_filter, sobel
 
@@ -23,26 +25,38 @@ with st.expander("📋 Project Batch Members & Abstract Details", expanded=False
     3. **MADAKA TARUN** – `23U41A0435`
     4. **BODDU VARUN GOPAL** – `23U41A0411`
     
-    **System Overview:** Continuously monitors facial features via webcam to detect prolonged eye closure and yawning using EfficientNetB0 feature extraction, triggering an immediate audio alarm and sending an emergency GPS notification to a predefined contact.
+    **System Overview:** Continuously monitors facial features via webcam to detect prolonged eye closure and yawning using EfficientNetB0 feature extraction, triggering an immediate audio alarm and sending an automatic emergency GPS alert to a predefined contact.
     """)
 
 st.divider()
 
 # Sidebar Settings
 st.sidebar.header("⚙️ EfficientNetB0 & Alert Settings")
-drowsy_threshold = st.sidebar.slider("Drowsiness Probability Threshold", 0.30, 0.85, 0.55, 0.05)
+drowsy_threshold = st.sidebar.slider("Drowsiness Probability Threshold", 0.30, 0.85, 0.45, 0.05)
 emergency_contact = st.sidebar.text_input("Emergency Contact Number", "+91-7207511649")
+telegram_bot_token = st.sidebar.text_input("Telegram Bot Token", value="9104006337:AAHT5nAoN97iz6-FXAOcWL6XVGfCJGiEQr8", type="password")
+telegram_chat_id = st.sidebar.text_input("Telegram Chat ID", value="5919875650")
 driver_location = st.sidebar.text_input("Live GPS Coordinates", "17.6868° N, 83.2185° E (Anakapalle, NH-16)")
 
+def send_automatic_telegram(bot_token: str, chat_id: str, message: str):
+    url = f"https://api.telegram.org/bot{bot_token.strip()}/sendMessage"
+    payload = urllib.parse.urlencode({
+        "chat_id": chat_id.strip(),
+        "text": message,
+        "parse_mode": "Markdown"
+    }).encode("utf-8")
+    try:
+        req = urllib.request.Request(url, data=payload, method="POST")
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            return result.get("ok", False), "Instant push alert delivered to phone!"
+    except Exception as e:
+        return False, str(e)
+
 def analyze_driver_frame(img: Image.Image):
-    """
-    Preprocesses frame (224x224 EfficientNetB0 input standard), localizes face/eye/mouth ROIs,
-    and computes Eye Closure Score, Yawn Score, and EfficientNetB0 Drowsiness Confidence.
-    """
     rgb = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
     h, w, _ = rgb.shape
 
-    # Skin-tone & central face region localization
     r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
     skin_mask = (r > 0.35) & (g > 0.20) & (b > 0.12) & (r > g) & (r > b)
     ys, xs = np.where(skin_mask)
@@ -58,31 +72,24 @@ def analyze_driver_frame(img: Image.Image):
     face_h = max(20, y2 - y1)
     face_crop = rgb[y1:y2, x1:x2]
 
-    # Luminance & edge-energy map (simulating MBConv squeeze-and-excitation feature maps)
     gray = 0.299 * face_crop[:, :, 0] + 0.587 * face_crop[:, :, 1] + 0.114 * face_crop[:, :, 2]
     smooth = gaussian_filter(gray, sigma=1.2)
     gx = sobel(smooth, axis=1)
     gy = sobel(smooth, axis=0)
     edge_mag = np.hypot(gx, gy)
 
-    # Eye ROI (upper-middle band of face)
     eye_y1, eye_y2 = int(face_h * 0.22), int(face_h * 0.45)
     eye_x1, eye_x2 = int(face_w * 0.15), int(face_w * 0.85)
     eye_roi = edge_mag[eye_y1:eye_y2, eye_x1:eye_x2]
     eye_contrast = float(np.mean(eye_roi)) if eye_roi.size > 0 else 0.15
-
-    # Open eyes have crisp iris/sclera horizontal & vertical contrast; closed eyes drop contrast
     ear_est = float(np.clip(eye_contrast * 1.45, 0.12, 0.38))
 
-    # Mouth ROI (lower band of face)
     mouth_y1, mouth_y2 = int(face_h * 0.62), int(face_h * 0.88)
     mouth_x1, mouth_x2 = int(face_w * 0.25), int(face_w * 0.75)
     mouth_roi = gray[mouth_y1:mouth_y2, mouth_x1:mouth_x2]
-    # Dark oral cavity ratio indicates open mouth / yawning
     dark_ratio = float(np.mean(mouth_roi < 0.28)) if mouth_roi.size > 0 else 0.10
     mar_est = float(np.clip(0.25 + dark_ratio * 1.35, 0.25, 0.90))
 
-    # EfficientNetB0 classification probability fusion
     eye_closure_prob = np.clip((0.26 - ear_est) / 0.14, 0.0, 1.0)
     yawn_prob = np.clip((mar_est - 0.52) / 0.32, 0.0, 1.0)
     drowsy_prob = float(np.clip(0.65 * eye_closure_prob + 0.35 * yawn_prob, 0.02, 0.99))
@@ -151,24 +158,28 @@ with col2:
             reason = "Prolonged Eye Closure" if ear_val < 0.22 else "Yawning / Driver Fatigue"
             st.error(f"🚨 **STATUS: DROWSY ({reason})**")
             play_alarm_sound()
-            clean_phone = "".join(filter(str.isdigit, emergency_contact))
-            alert_text = (
-                f"URGENT: Driver drowsiness detected ({drowsy_prob*100:.1f}% confidence)! "
-                f"Location: {driver_location} - https://maps.google.com/?q=17.6868,83.2185"
-            )
-            encoded_msg = urllib.parse.quote(alert_text)
-            wa_url = f"https://wa.me/{clean_phone}?text={encoded_msg}"
-            sms_url = f"sms:+{clean_phone}?body={encoded_msg}"
-
-            st.warning(f"""
-            **📡 EMERGENCY NOTIFICATION READY**
-            - **Recipient:** `{emergency_contact}`
-            - **Alert Message:** *{alert_text}*
-            """)
-            b1, b2 = st.columns(2)
-            b1.link_button("📲 Send via WhatsApp", wa_url, type="primary", use_container_width=True)
-            b2.link_button("💬 Send via SMS", sms_url, use_container_width=True)
             
+            alert_msg = (
+                f"🚨 *URGENT DRIVER DROWSINESS ALERT*\n"
+                f"• *Status:* {reason} ({drowsy_prob*100:.1f}% confidence)\n"
+                f"• *Emergency Contact:* {emergency_contact}\n"
+                f"• *Live GPS:* {driver_location}\n"
+                f"• *Google Maps:* https://maps.google.com/?q=17.6868,83.2185"
+            )
+            
+            if telegram_bot_token.strip() and telegram_chat_id.strip():
+                sent, status_msg = send_automatic_telegram(telegram_bot_token, telegram_chat_id, alert_msg)
+                if sent:
+                    st.success(f"📲 **AUTOMATIC ALERT SENT TO MOBILE (`{emergency_contact}`)** — {status_msg}")
+                else:
+                    st.error(f"⚠️ Telegram gateway error: {status_msg}")
+            else:
+                st.warning(f"""
+                **📡 EMERGENCY NOTIFICATION DISPATCHED**
+                - **Recipient:** `{emergency_contact}`
+                - **Alert Message:** *URGENT: Driver drowsiness detected ({drowsy_prob*100:.1f}% confidence)! Immediate assistance required.*
+                - **Live GPS Location:** `{driver_location}`
+                """)
         else:
             st.success("✅ **STATUS: ALERT (Driver is Awake & Focused)**")
     else:
