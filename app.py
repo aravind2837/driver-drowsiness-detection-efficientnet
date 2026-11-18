@@ -1,5 +1,6 @@
 import streamlit as st
 import numpy as np
+import urllib.parse
 from PIL import Image, ImageDraw
 from scipy.ndimage import gaussian_filter, sobel
 
@@ -150,13 +151,24 @@ with col2:
             reason = "Prolonged Eye Closure" if ear_val < 0.22 else "Yawning / Driver Fatigue"
             st.error(f"🚨 **STATUS: DROWSY ({reason})**")
             play_alarm_sound()
-            
+            clean_phone = "".join(filter(str.isdigit, emergency_contact))
+            alert_text = (
+                f"URGENT: Driver drowsiness detected ({drowsy_prob*100:.1f}% confidence)! "
+                f"Location: {driver_location} - https://maps.google.com/?q=17.6868,83.2185"
+            )
+            encoded_msg = urllib.parse.quote(alert_text)
+            wa_url = f"https://wa.me/{clean_phone}?text={encoded_msg}"
+            sms_url = f"sms:+{clean_phone}?body={encoded_msg}"
+
             st.warning(f"""
-            **📡 EMERGENCY NOTIFICATION DISPATCHED**
+            **📡 EMERGENCY NOTIFICATION READY**
             - **Recipient:** `{emergency_contact}`
-            - **Alert Message:** *URGENT: Driver drowsiness detected ({drowsy_prob*100:.1f}% confidence)! Immediate assistance required.*
-            - **Live GPS Location:** `{driver_location}`
+            - **Alert Message:** *{alert_text}*
             """)
+            b1, b2 = st.columns(2)
+            b1.link_button("📲 Send via WhatsApp", wa_url, type="primary", use_container_width=True)
+            b2.link_button("💬 Send via SMS", sms_url, use_container_width=True)
+            
         else:
             st.success("✅ **STATUS: ALERT (Driver is Awake & Focused)**")
     else:
