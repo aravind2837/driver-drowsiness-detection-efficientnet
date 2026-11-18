@@ -30,7 +30,7 @@ st.divider()
 # Sidebar Settings
 st.sidebar.header("⚙️ EfficientNetB0 & Alert Settings")
 drowsy_threshold = st.sidebar.slider("Drowsiness Probability Threshold", 0.30, 0.85, 0.55, 0.05)
-emergency_contact = st.sidebar.text_input("Emergency Contact Number", "+91-9876543210")
+emergency_contact = st.sidebar.text_input("Emergency Contact Number", "+91-7207511649")
 driver_location = st.sidebar.text_input("Live GPS Coordinates", "17.6868° N, 83.2185° E (Anakapalle, NH-16)")
 
 def analyze_driver_frame(img: Image.Image):
